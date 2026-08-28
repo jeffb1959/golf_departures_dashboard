@@ -7,3 +7,8 @@ services:
       - .env
     environment:
       TZ: America/Toronto
+    volumes:
+      - reservation_data:/data
+
+volumes:
+  reservation_data:
