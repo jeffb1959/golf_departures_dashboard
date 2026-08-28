@@ -74,7 +74,7 @@ class BuildDisplayDepartureTests(unittest.TestCase):
     def test_no_reservations_returns_empty_tuple(self):
         self.assertEqual(build_display_departures((), make_forecast()), ())
 
-    def test_sort_by_datetime_and_default_limit_is_6(self):
+    def test_sort_by_datetime_and_default_limit_is_5(self):
         source = [
             make_reservation("R1", date(2026, 8, 30), 8),
             make_reservation("R2", date(2026, 8, 29), 12),
@@ -85,8 +85,8 @@ class BuildDisplayDepartureTests(unittest.TestCase):
             make_reservation("R7", date(2026, 9, 1), 8),
         ]
         result = build_display_departures(source, make_forecast())
-        self.assertEqual([item.reservation_id for item in result], ["R3", "R2", "R4", "R1", "R5", "R7"])
-        self.assertEqual(len(result), 6)
+        self.assertEqual([item.reservation_id for item in result], ["R3", "R2", "R4", "R1", "R5"])
+        self.assertEqual(len(result), 5)
 
     def test_limit_parameter(self):
         source = tuple(make_reservation(f"R{i}", date(2026, 8, 29), 8 + i) for i in range(6))

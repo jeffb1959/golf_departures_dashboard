@@ -110,7 +110,7 @@ def build_display_departures(
     reservations: Iterable[GolfReservation],
     forecast: EnvironmentCanadaForecast,
     *,
-    limit: int = 6,
+    limit: int = 5,
 ) -> tuple[DisplayDeparture, ...]:
     """Transforme les départs pertinents en blocs d’affichage directement exploitables."""
 
