@@ -3,3 +3,7 @@ services:
     build: .
     ports:
       - "5051:5000"
+    env_file:
+      - .env
+    environment:
+      TZ: America/Toronto
