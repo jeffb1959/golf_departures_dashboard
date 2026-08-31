@@ -6,6 +6,10 @@ from flask import Flask, jsonify, request, send_file
 from app.display_artifact import DEFAULT_DISPLAY_OUTPUT_DIR, get_display_artifact_path
 from app.display_targets import get_display_target
 from app.dashboard_refresh import DashboardRefreshError, refresh_dashboard
+from app.display_manifest import (
+    DisplayArtifactNotFoundError,
+    build_display_manifest,
+)
 
 from app.reservation_refresh import (
     ReservationRefreshResult,
@@ -141,6 +145,36 @@ def api_display_artifact():
     )
     response.headers["X-Display-Profile"] = target.name
     response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/display/manifest")
+def api_display_manifest():
+    """Expose les métadonnées de l'artefact déjà généré pour le contrôleur."""
+
+    try:
+        target = get_display_target()
+    except Exception:
+        app.logger.error("Profil d'affichage invalide pour la route /api/display/manifest.")
+        return jsonify(
+            status="error",
+            error="display_not_configured",
+        ), 503
+
+    try:
+        manifest = build_display_manifest(
+            target=target,
+            output_dir=DEFAULT_DISPLAY_OUTPUT_DIR,
+        )
+    except DisplayArtifactNotFoundError:
+        return jsonify(
+            status="error",
+            error="display_artifact_not_found",
+        ), 404
+
+    response = jsonify(manifest.to_dict())
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Display-Profile"] = target.name
     return response
 
 

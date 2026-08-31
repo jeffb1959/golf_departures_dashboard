@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 import os
 import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app import web
 from app import display_targets
@@ -204,6 +206,81 @@ class WebTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         logger_error.assert_called_once()
+
+    def test_api_display_manifest_returns_metadata_headers_when_available(self) -> None:
+        payload = b"manifest-payload"
+        target = display_targets.get_display_target("waveshare_75_bw")
+        mtime = 1_700_000_000
+        expected_generated_at = datetime.fromtimestamp(mtime, tz=ZoneInfo("America/Toronto"))
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_path = self._create_artifact(tmp, payload)
+            os.utime(artifact_path, times=(mtime, mtime))
+
+            with patch.object(web, "DEFAULT_DISPLAY_OUTPUT_DIR", Path(tmp)):
+                response = self.client.get("/api/display/manifest")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIsInstance(data, dict)
+        self.assertEqual(
+            data,
+            {
+                "schema_version": 1,
+                "profile": target.name,
+                "width": target.width,
+                "height": target.height,
+                "output_format": target.output_format,
+                "mime_type": target.mime_type,
+                "payload_size": len(payload),
+                "sha256": expected_sha,
+                "generated_at": expected_generated_at.isoformat(),
+                "artifact_url": "/api/display/artifact",
+            },
+        )
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+        self.assertEqual(response.headers.get("X-Display-Profile"), target.name)
+
+    def test_api_display_manifest_not_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(web, "DEFAULT_DISPLAY_OUTPUT_DIR", Path(tmp)):
+                response = self.client.get("/api/display/manifest")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.get_json(),
+            {"status": "error", "error": "display_artifact_not_found"},
+        )
+
+    def test_api_display_manifest_invalid_profile(self) -> None:
+        with patch.dict(os.environ, {"DISPLAY_PROFILE": "inconnu"}, clear=True):
+            response = self.client.get("/api/display/manifest")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.get_json(),
+            {"status": "error", "error": "display_not_configured"},
+        )
+
+    def test_api_display_manifest_does_not_refresh_services(self) -> None:
+        payload = b"manifest-stable"
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            web, "DEFAULT_DISPLAY_OUTPUT_DIR", Path(tmp)
+        ), patch("app.display_artifact.generate_display_artifact") as generate_display, patch.object(
+            web, "refresh_dashboard"
+        ) as refresh_dashboard, patch.object(
+            web, "refresh_reservation_cache"
+        ) as refresh_reservation:
+            target = display_targets.get_display_target("waveshare_75_bw")
+            self._create_artifact(tmp, payload)
+
+            response = self.client.get("/api/display/manifest")
+
+            self.assertEqual(response.status_code, 200)
+            refresh_reservation.assert_not_called()
+            refresh_dashboard.assert_not_called()
+            generate_display.assert_not_called()
+            self.assertEqual(response.get_json()["profile"], target.name)
 
     def test_dashboard_refresh_without_configured_token_returns_503(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch.object(
