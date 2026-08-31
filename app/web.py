@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request, send_file
 
 from app.display_artifact import DEFAULT_DISPLAY_OUTPUT_DIR, get_display_artifact_path
 from app.display_targets import get_display_target
+from app.dashboard_refresh import DashboardRefreshError, refresh_dashboard
 
 from app.reservation_refresh import (
     ReservationRefreshResult,
@@ -65,6 +66,49 @@ def api_refresh_reservations():
         status="ok",
         reservations=result.reservations_count,
         updated_at=result.updated_at.isoformat(timespec="seconds"),
+    )
+
+
+@app.post("/api/dashboard/refresh")
+def api_refresh_dashboard():
+    """Déclenche un rafraîchissement complet du dashboard."""
+
+    configured_token = _load_refresh_token()
+    if configured_token is None:
+        return jsonify(status="error", error="refresh_not_configured"), 503
+
+    request_token = _extract_bearer_token(request.headers.get("Authorization"))
+    if request_token is None or not hmac.compare_digest(request_token, configured_token):
+        return jsonify(status="error", error="unauthorized"), 401
+
+    try:
+        result = refresh_dashboard()
+    except DashboardRefreshError as exc:
+        if exc.stage == "reservations":
+            app.logger.error("Échec du rafraîchissement complet du dashboard: phase réservations.")
+            return jsonify(
+                status="error",
+                error="dashboard_reservations_refresh_failed",
+            ), 503
+
+        app.logger.error("Échec du rafraîchissement complet du dashboard: phase affichage.")
+        return jsonify(
+            status="error",
+            error="dashboard_display_refresh_failed",
+        ), 503
+
+    return jsonify(
+        status="ok",
+        reservations={
+            "count": result.reservations_count,
+            "updated_at": result.reservations_updated_at.isoformat(timespec="seconds"),
+        },
+        display={
+            "profile": result.display_profile,
+            "payload_size": result.display_payload_size,
+            "departures_count": result.display_departures_count,
+            "generated_at": result.display_generated_at.isoformat(timespec="seconds"),
+        },
     )
 
 

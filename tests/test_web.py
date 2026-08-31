@@ -13,6 +13,7 @@ from app import web
 from app import display_targets
 from app.display_artifact import get_display_artifact_path
 from app.reservation_refresh import ReservationRefreshResult
+from app.dashboard_refresh import DashboardRefreshError, DashboardRefreshResult
 
 
 FAKE_TOKEN = "jeton-fictif-long-et-aleatoire"
@@ -28,6 +29,10 @@ class WebTests(unittest.TestCase):
     def post_refresh(self, authorization: str | None = None):
         headers = {"Authorization": authorization} if authorization else {}
         return self.client.post("/api/reservations/refresh", headers=headers)
+
+    def post_dashboard_refresh(self, authorization: str | None = None):
+        headers = {"Authorization": authorization} if authorization else {}
+        return self.client.post("/api/dashboard/refresh", headers=headers)
 
     def test_health_still_returns_200(self) -> None:
         response = self.client.get("/health")
@@ -199,6 +204,109 @@ class WebTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         logger_error.assert_called_once()
+
+    def test_dashboard_refresh_without_configured_token_returns_503(self) -> None:
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            web, "refresh_dashboard"
+        ) as refresh:
+            response = self.post_dashboard_refresh(f"Bearer {FAKE_TOKEN}")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.get_json(),
+            {"status": "error", "error": "refresh_not_configured"},
+        )
+        refresh.assert_not_called()
+
+    def test_dashboard_refresh_without_authorization_returns_401(self) -> None:
+        with patch.dict(os.environ, {"GOLF_REFRESH_TOKEN": FAKE_TOKEN}, clear=True):
+            response = self.post_dashboard_refresh()
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json(), {"status": "error", "error": "unauthorized"})
+
+    def test_dashboard_refresh_with_wrong_bearer_returns_401(self) -> None:
+        with patch.dict(os.environ, {"GOLF_REFRESH_TOKEN": FAKE_TOKEN}, clear=True):
+            response = self.post_dashboard_refresh(f"Bearer {OTHER_FAKE_TOKEN}")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json(), {"status": "error", "error": "unauthorized"})
+
+    def test_dashboard_refresh_success_returns_payload(self) -> None:
+        result = DashboardRefreshResult(
+            reservations_count=3,
+            reservations_updated_at=datetime(2026, 8, 31, 17, 0),
+            display_profile="waveshare_75_bw",
+            display_payload_size=48_000,
+            display_departures_count=3,
+            display_generated_at=datetime(2026, 8, 31, 17, 0),
+        )
+        with patch.dict(os.environ, {"GOLF_REFRESH_TOKEN": FAKE_TOKEN}, clear=True), patch.object(
+            web, "refresh_dashboard", return_value=result
+        ):
+            response = self.post_dashboard_refresh(f"Bearer {FAKE_TOKEN}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json(),
+            {
+                "status": "ok",
+                "reservations": {
+                    "count": 3,
+                    "updated_at": "2026-08-31T17:00:00",
+                },
+                "display": {
+                    "profile": "waveshare_75_bw",
+                    "payload_size": 48000,
+                    "departures_count": 3,
+                    "generated_at": "2026-08-31T17:00:00",
+                },
+            },
+        )
+
+    def test_dashboard_refresh_reservations_stage_error_returns_503(self) -> None:
+        with patch.dict(os.environ, {"GOLF_REFRESH_TOKEN": FAKE_TOKEN}, clear=True), patch(
+            "app.web.refresh_dashboard",
+            side_effect=DashboardRefreshError("reservations"),
+        ):
+            response = self.post_dashboard_refresh(f"Bearer {FAKE_TOKEN}")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.get_json(),
+            {"status": "error", "error": "dashboard_reservations_refresh_failed"},
+        )
+
+    def test_dashboard_refresh_display_stage_error_returns_503(self) -> None:
+        with patch.dict(os.environ, {"GOLF_REFRESH_TOKEN": FAKE_TOKEN}, clear=True), patch(
+            "app.web.refresh_dashboard",
+            side_effect=DashboardRefreshError("display"),
+        ):
+            response = self.post_dashboard_refresh(f"Bearer {FAKE_TOKEN}")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.get_json(),
+            {"status": "error", "error": "dashboard_display_refresh_failed"},
+        )
+
+    def test_dashboard_refresh_calls_orchestrator(self) -> None:
+        with patch.dict(os.environ, {"GOLF_REFRESH_TOKEN": FAKE_TOKEN}, clear=True), patch.object(
+            web,
+            "refresh_dashboard",
+            return_value=DashboardRefreshResult(
+                reservations_count=0,
+                reservations_updated_at=datetime(2026, 8, 31, 17, 0),
+                display_profile="waveshare_75_bw",
+                display_payload_size=0,
+                display_departures_count=0,
+                display_generated_at=datetime(2026, 8, 31, 17, 0),
+            ),
+        ) as refresh:
+            response = self.post_dashboard_refresh(f"Bearer {FAKE_TOKEN}")
+
+        self.assertEqual(response.status_code, 200)
+        refresh.assert_called_once_with()
 
 
 if __name__ == "__main__":
