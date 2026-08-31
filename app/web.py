@@ -1,7 +1,10 @@
 import hmac
 import os
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_file
+
+from app.display_artifact import DEFAULT_DISPLAY_OUTPUT_DIR, get_display_artifact_path
+from app.display_targets import get_display_target
 
 from app.reservation_refresh import (
     ReservationRefreshResult,
@@ -63,6 +66,38 @@ def api_refresh_reservations():
         reservations=result.reservations_count,
         updated_at=result.updated_at.isoformat(timespec="seconds"),
     )
+
+
+@app.get("/api/display/artifact")
+def api_display_artifact():
+    """Expose l'artefact déjà généré pour le profil courant."""
+
+    try:
+        target = get_display_target()
+    except Exception:
+        app.logger.error("Profil d'affichage invalide pour la route /api/display/artifact.")
+        return jsonify(
+            status="error",
+            error="display_not_configured",
+        ), 503
+
+    artifact_path = get_display_artifact_path(target, output_dir=DEFAULT_DISPLAY_OUTPUT_DIR)
+    if not artifact_path.exists() or not artifact_path.is_file():
+        return jsonify(
+            status="error",
+            error="display_artifact_not_found",
+        ), 404
+
+    response = send_file(
+        artifact_path,
+        mimetype=target.mime_type,
+        download_name=artifact_path.name,
+        as_attachment=False,
+        etag=False,
+    )
+    response.headers["X-Display-Profile"] = target.name
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 if __name__ == "__main__":

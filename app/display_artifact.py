@@ -72,7 +72,12 @@ def _build_payload_from_target(
     return target.build_payload(tuple(departures))
 
 
-def _build_output_path(output_dir: Path | str, target: DisplayTarget) -> Path:
+def get_display_artifact_path(
+    target: DisplayTarget,
+    output_dir: Path | str = DEFAULT_DISPLAY_OUTPUT_DIR,
+) -> Path:
+    """Retourne le chemin de sortie de l'artefact pour un profil."""
+
     output_directory = Path(output_dir)
     output_directory.mkdir(parents=True, exist_ok=True)
     return output_directory / f"departures_display{target.file_extension}"
@@ -89,7 +94,7 @@ def build_display_artifact(
 
     departure_list = tuple(departures)
     payload = _build_payload_from_target(departure_list, target)
-    output_path = _build_output_path(output_dir, target)
+    output_path = get_display_artifact_path(target, output_dir=output_dir)
     _write_atomic_bytes(output_path, payload)
     return DisplayArtifactResult(
         profile_name=target.name,

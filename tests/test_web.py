@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from datetime import datetime
 import os
+import tempfile
 import unittest
 from unittest.mock import patch
+from pathlib import Path
 
 from app import web
+from app import display_targets
+from app.display_artifact import get_display_artifact_path
 from app.reservation_refresh import ReservationRefreshResult
 
 
@@ -125,6 +129,76 @@ class WebTests(unittest.TestCase):
             self.assertNotIn(FAKE_TOKEN, body)
             self.assertNotIn(OTHER_FAKE_TOKEN, body)
             self.assertNotIn(FAKE_PASSWORD, body)
+
+    def _create_artifact(self, directory: str | Path, payload: bytes) -> Path:
+        target = display_targets.get_display_target("waveshare_75_bw")
+        artifact_path = get_display_artifact_path(target, output_dir=directory)
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_bytes(payload)
+        return artifact_path
+
+    def test_api_display_artifact_returns_file_and_headers_when_available(self) -> None:
+        payload = b"0123456789ABCDEF"
+        with tempfile.TemporaryDirectory() as tmp:
+            target = display_targets.get_display_target("waveshare_75_bw")
+            artifact_path = self._create_artifact(tmp, payload)
+
+            with patch.object(web, "DEFAULT_DISPLAY_OUTPUT_DIR", Path(tmp)):
+                response = self.client.get("/api/display/artifact")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data, payload)
+            self.assertTrue(response.headers["Content-Type"].startswith(target.mime_type))
+            self.assertEqual(response.headers.get("X-Display-Profile"), target.name)
+            self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+            self.assertEqual(response.headers.get("Content-Length"), str(len(payload)))
+            self.assertTrue(artifact_path.is_file())
+
+    def test_api_display_artifact_not_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(web, "DEFAULT_DISPLAY_OUTPUT_DIR", Path(tmp)):
+                response = self.client.get("/api/display/artifact")
+
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(
+                response.get_json(),
+                {"status": "error", "error": "display_artifact_not_found"},
+            )
+
+    def test_api_display_artifact_invalid_profile(self) -> None:
+        with patch.dict(os.environ, {"DISPLAY_PROFILE": "inconnu"}, clear=True):
+            response = self.client.get("/api/display/artifact")
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(
+                response.get_json(),
+                {"status": "error", "error": "display_not_configured"},
+            )
+
+    def test_api_display_artifact_does_not_generate_artifact(self) -> None:
+        payload = b"1234"
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            web, "DEFAULT_DISPLAY_OUTPUT_DIR", Path(tmp)
+        ), patch(
+            "app.display_artifact.generate_display_artifact",
+            side_effect=RuntimeError("should not be called"),
+        ) as generate:
+            target = display_targets.get_display_target("waveshare_75_bw")
+            self._create_artifact(tmp, payload)
+
+            response = self.client.get("/api/display/artifact")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, payload)
+        generate.assert_not_called()
+
+    def test_api_display_artifact_invalid_profile_logs_configured_error(self) -> None:
+        with patch.dict(os.environ, {"DISPLAY_PROFILE": "inconnu"}, clear=True), patch.object(
+            web.app.logger, "error"
+        ) as logger_error:
+            response = self.client.get("/api/display/artifact")
+
+        self.assertEqual(response.status_code, 503)
+        logger_error.assert_called_once()
 
 
 if __name__ == "__main__":
