@@ -49,6 +49,27 @@ class ReservationParserTests(unittest.TestCase):
     def test_parse_hour(self) -> None:
         self.assertEqual(reservation_parser.parse_hour("08:57"), time(8, 57))
 
+    def test_parse_english_dates(self) -> None:
+        self.assertEqual(
+            reservation_parser.parse_english_date("Fri, September 4, 2026"),
+            date(2026, 9, 4),
+        )
+        self.assertEqual(
+            reservation_parser.parse_english_date("September 4, 2026"),
+            date(2026, 9, 4),
+        )
+
+    def test_parse_english_hours(self) -> None:
+        expected = {
+            "8:30 AM": time(8, 30),
+            "1:05 PM": time(13, 5),
+            "12:00 AM": time(0, 0),
+            "12:00 PM": time(12, 0),
+        }
+        for value, parsed in expected.items():
+            with self.subTest(value=value):
+                self.assertEqual(reservation_parser.parse_hour(value), parsed)
+
     def test_parse_hour_rejects_non_full_line_text(self) -> None:
         invalid_values = (
             "(UTC-05:00) Eastern Time",
@@ -91,6 +112,12 @@ ID de réservation : TOUR-99
         )
         self.assertEqual(players, ["Alice Martin", "Bob Durand", "Charles Léon"])
 
+    def test_parse_three_players_with_name_and_and(self) -> None:
+        players = reservation_parser.parse_players(
+            "Alice. Martin, Bob. Martin, and Charles Martin"
+        )
+        self.assertEqual(players, ["Alice Martin", "Bob Martin", "Charles Martin"])
+
     def test_clean_player_name_with_spurious_dot(self) -> None:
         self.assertEqual(
             reservation_parser.parse_player_name("Alice. Tremblay"),
@@ -104,6 +131,64 @@ ID de réservation : TOUR-99
             ),
             "ABCD-1234",
         )
+        self.assertEqual(
+            reservation_parser.parse_reservation_id_line("Booking ID: TEST-5678"),
+            "TEST-5678",
+        )
+
+    def test_parse_complete_current_english_confirmation(self) -> None:
+        reservation = reservation_parser.parse_confirmation_reservation(
+            """\
+Reservation confirmed
+Example Golf Club
+Reservation confirmed
+Fri, September 4, 2026
+8:30 AM
+3 players • Round of golf (18 holes)
+Lorette
+Name: Alice. Martin, Bob. Martin, and Charles Martin
+Booking ID: TEST-1234
+"""
+        )
+        self.assertEqual(reservation.date, date(2026, 9, 4))
+        self.assertEqual(reservation.heure, time(8, 30))
+        self.assertEqual(reservation.joueurs, ["Alice Martin", "Bob Martin", "Charles Martin"])
+        self.assertEqual(reservation.reservation_id, "TEST-1234")
+
+    def test_english_confirmation_ignores_forwarded_header_date(self) -> None:
+        reservation = reservation_parser.parse_confirmation_reservation(
+            """\
+Sent: January 2, 2026
+January 2, 2026
+Reservation confirmed
+September 4, 2026
+1:05 PM
+2 players • Round of golf (18 holes)
+Example course
+Name: Alice Martin and Bob Martin
+Booking ID: TEST-5678
+"""
+        )
+        self.assertEqual(reservation.date, date(2026, 9, 4))
+        self.assertEqual(reservation.heure, time(13, 5))
+
+    def test_parse_complete_historical_english_confirmation(self) -> None:
+        reservation = reservation_parser.parse_confirmation_reservation(
+            """\
+October 1, 2025
+Tee Time Reservation Confirmation
+Reservation 0H8D-6F4Z
+11:45 AM
+October 18, 2025
+Lorette
+Round of golf (18 holes)
+● ● ● Alice. Martin, Bob. Martin, and Guest
+"""
+        )
+        self.assertEqual(reservation.date, date(2025, 10, 18))
+        self.assertEqual(reservation.heure, time(11, 45))
+        self.assertEqual(reservation.joueurs, ["Alice Martin", "Bob Martin", "Guest"])
+        self.assertEqual(reservation.reservation_id, "0H8D-6F4Z")
 
     def test_parse_complete_confirmation(self) -> None:
         received_at = datetime(2026, 8, 10, 12, 0, 0)

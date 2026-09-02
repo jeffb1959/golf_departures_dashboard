@@ -17,7 +17,10 @@ import ssl
 from app import reservation_parser
 
 
-CONFIRMATION_SUBJECT = "confirmation de réservation"
+CONFIRMATION_SUBJECTS = (
+    "confirmation de réservation",
+    "tee time booking confirmation",
+)
 SEARCH_WINDOW_DAYS = 7
 IMAP_MONTHS_EN = (
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -128,8 +131,11 @@ def is_confirmation_subject(raw_subject: str | None) -> bool:
     """Indique si le sujet correspond à une confirmation de réservation."""
 
     normalized = _normalize_subject(decode_mime_subject(raw_subject))
-    target = _normalize_subject(CONFIRMATION_SUBJECT)
-    return normalized == target or f" {target} " in f" {normalized} "
+    normalized_targets = (_normalize_subject(subject) for subject in CONFIRMATION_SUBJECTS)
+    return any(
+        (normalized == target) or (f" {target} " in f" {normalized} ")
+        for target in normalized_targets
+    )
 
 
 def _extract_headers(message_bytes: bytes) -> tuple[str, datetime | None]:

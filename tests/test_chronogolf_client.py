@@ -173,6 +173,38 @@ class ChronogolfClientTests(unittest.TestCase):
         )
         self.assertIn(("fetch", "1", "(BODY.PEEK[])") , fake.calls)
 
+    def test_confirmation_subject_is_matching_french_and_english(self) -> None:
+        self.assertTrue(
+            chronogolf_client.is_confirmation_subject("Confirmation de réservation")
+        )
+        self.assertTrue(
+            chronogolf_client.is_confirmation_subject("Tee Time Booking Confirmation")
+        )
+
+    def test_confirmation_subject_with_prefixes_is_matching(self) -> None:
+        self.assertTrue(chronogolf_client.is_confirmation_subject("TR : Confirmation de réservation"))
+        self.assertTrue(
+            chronogolf_client.is_confirmation_subject("TR : Tee Time Booking Confirmation")
+        )
+        self.assertTrue(
+            chronogolf_client.is_confirmation_subject("FW: Tee Time Booking Confirmation")
+        )
+
+    def test_non_confirmation_subject_is_rejected(self) -> None:
+        self.assertFalse(chronogolf_client.is_confirmation_subject("Infolettre"))
+
+    def test_english_confirmation_triggers_body_peek(self) -> None:
+        fake = FakeImap(
+            "1",
+            {"1": make_headers("Tee Time Booking Confirmation", "Tue, 11 Aug 2026 11:00:00 +0000")},
+            {"1": b"This is an unsupported english body"},
+        )
+        result = self.fetch(fake)
+        self.assertIn(("fetch", "1", "(BODY.PEEK[])"), fake.calls)
+        self.assertEqual(result.confirmations_found, 1)
+        self.assertEqual(result.confirmations_ignored, 1)
+        self.assertEqual(result.reservations, [])
+
     def test_non_confirmation_subject_does_not_fetch_body(self) -> None:
         fake = FakeImap(
             "1 2",
